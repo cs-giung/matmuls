@@ -1,3 +1,6 @@
 [submodule "ThunderKittens"]
 	path = ThunderKittens
 	url = https://github.com/HazyResearch/ThunderKittens
+[submodule "pytorch"]
+	path = pytorch
+	url = https://github.com/pytorch/pytorch
