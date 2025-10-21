@@ -21,6 +21,8 @@ explicit = true
 
 [dependency-groups]
 dev = [
-    "ipykernel>=7.0.1",
-    "matplotlib>=3.10.7",
+    "ipykernel",
+    "matplotlib",
+    "tensorboard",
+    "xprof",
 ]
