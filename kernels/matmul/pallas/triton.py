@@ -25,20 +25,17 @@ def matmul_fwd_kernel(
     preferred_element_type: jax.typing.DTypeLike,
 ):
     m_idx, n_idx = pl.program_id(0), pl.program_id(1)
-
     m_mask = m_idx * bm + jnp.arange(bm) < m
     n_mask = n_idx * bn + jnp.arange(bn) < n
-    m_span = pl.dslice(m_idx * bm, bm)
-    n_span = pl.dslice(n_idx * bn, bn)
 
     def body(k_idx, carry):
         o_prev = carry
         k_mask = k_idx * bk + jnp.arange(bk) < k
         k_span = pl.dslice(k_idx * bk, bk)
         x = plgpu.load(
-            x_ref.at[m_span, k_span], mask=(m_mask[:, None] & k_mask[None, :]), other=0.0)
+            x_ref.at[:, k_span], mask=(m_mask[:, None] & k_mask[None, :]), other=0.0)
         w = plgpu.load(
-            w_ref.at[n_span, k_span], mask=(n_mask[:, None] & k_mask[None, :]), other=0.0)
+            w_ref.at[:, k_span], mask=(n_mask[:, None] & k_mask[None, :]), other=0.0)
         return jax.lax.dot(
             x, w,
             dimension_numbers=(((1,), (1,)), ((), ())),
@@ -48,8 +45,8 @@ def matmul_fwd_kernel(
 
     o = jnp.zeros((bm, bn), dtype=preferred_element_type)
     o = jax.lax.fori_loop(0, pl.cdiv(k, bk), body, o)
-    plgpu.store(
-        o_ref.at[m_span, n_span], o.astype(o_ref.dtype), mask=(m_mask[:, None] & n_mask[None, :]))
+
+    plgpu.store(o_ref.at[:, :], o.astype(o_ref.dtype), mask=(m_mask[:, None] & n_mask[None, :]))
 
 
 def matmul_fwd(
