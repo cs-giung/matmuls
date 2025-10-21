@@ -54,10 +54,10 @@ def matmul_fwd(
     w: jax.Array, # [n, k]
     *,
     bm: int = 32,
-    bn: int = 32,
+    bn: int = 64,
     bk: int = 32,
     num_warps: int = 4,
-    num_stages: int = 3,
+    num_stages: int = 1,
     precision: jax.lax.PrecisionLike = None,
     preferred_element_type: jax.typing.DTypeLike = jnp.float32,
 ):

@@ -61,11 +61,11 @@ def quantized_matmul_int8_fwd(
     w_q: jax.Array, # [n, k]
     w_s: jax.Array, # [n,]
     *,
-    bm: int = 128,
-    bk: int = 128,
-    bn: int = 128,
-    num_warps: int | None = None,
-    num_stages: int | None = None,
+    bm: int = 32,
+    bk: int = 32,
+    bn: int = 32,
+    num_warps: int = 4,
+    num_stages: int = 1,
     precision: jax.lax.PrecisionLike = None,
     preferred_element_type: jax.typing.DTypeLike = jnp.int32,
 ):
