@@ -100,7 +100,7 @@ def quantized_matmul_uint8_fwd(
         quantized_matmul_uint8_fwd_kernel,
         m=m, n=n, k=k, bm=bm, bn=bn, bk=bk,
         precision=precision, preferred_element_type=preferred_element_type)
-    kernel_name = f"quantized_matmul_int8_fwd_{bm}_{bk}_{bn}"
+    kernel_name = f"quantized_matmul_uint8_fwd_{bm}_{bk}_{bn}"
     kernel_call = pl.pallas_call(
         kernel, out_shape,
         grid=grid, in_specs=in_specs, out_specs=out_specs, compiler_params=compiler_params)
