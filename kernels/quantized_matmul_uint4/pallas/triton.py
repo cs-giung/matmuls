@@ -10,15 +10,11 @@ def _next_multiple(x: int, n: int) -> int:
     return x if r == 0 else x + (n - r)
 
 
-def quantized_matmul_int8_fwd_kernel(
+def quantized_matmul_uint4_fwd_kernel(
     x_q_ref: jax.Array, # [bm, pk]
-    x_q_row_sum_ref: jax.Array, # [bm,]
     x_s_ref: jax.Array, # [bm,]
-    x_z_ref: jax.Array, # [bm,]
     w_q_ref: jax.Array, # [bn, pk]
-    w_q_row_sum_ref: jax.Array, # [bn,]
     w_s_ref: jax.Array, # [bn,]
-    w_z_ref: jax.Array, # [bn,]
     o_ref: jax.Array, # [bm, bn]
     *,
     m: int,
@@ -43,7 +39,8 @@ def quantized_matmul_int8_fwd_kernel(
         w_q = plgpu.load(
             w_q_ref.at[:, k_span], mask=(n_mask[:, None] & k_mask[None, :]), other=0)
         return jax.lax.dot(
-            x_q, w_q,
+            # NOTE: upcast narrow-width integers
+            x_q.astype(jnp.uint8), w_q.astype(jnp.uint8),
             dimension_numbers=(((1,), (1,)), ((), ())),
             precision=precision,
             preferred_element_type=preferred_element_type,
@@ -53,27 +50,17 @@ def quantized_matmul_int8_fwd_kernel(
     o = jax.lax.fori_loop(0, pl.cdiv(k, bk), body, o)
 
     x_s = plgpu.load(x_s_ref.at[:], mask=m_mask, other=0.0)
-    x_z = plgpu.load(x_z_ref.at[:], mask=m_mask, other=0.0)
     w_s = plgpu.load(w_s_ref.at[:], mask=n_mask, other=0.0)
-    w_z = plgpu.load(w_z_ref.at[:], mask=n_mask, other=0.0)
-    x_q_row_sum = plgpu.load(x_q_row_sum_ref.at[:], mask=m_mask, other=0.0)
-    w_q_row_sum = plgpu.load(w_q_row_sum_ref.at[:], mask=n_mask, other=0.0)
-
-    o = jnp.outer(x_s, w_s) * o.astype(x_s.dtype) \
-        + jnp.outer(x_s * x_q_row_sum, w_z) \
-        + jnp.outer(x_z, w_s * w_q_row_sum) \
-        + jnp.outer(x_z, w_z) * k
+    o = x_s[:, None] * w_s[None, :] * o.astype(x_s.dtype)
 
     plgpu.store(o_ref.at[:, :], o.astype(o_ref.dtype), mask=(m_mask[:, None] & n_mask[None, :]))
+    
 
-
-def quantized_matmul_int8_fwd(
+def quantized_matmul_uint4_fwd(
     x_q: jax.Array, # [m, k]
     x_s: jax.Array, # [m,]
-    x_z: jax.Array, # [m,]
     w_q: jax.Array, # [n, k]
     w_s: jax.Array, # [n,]
-    w_z: jax.Array, # [n,]
     *,
     bm: int = 32,
     bk: int = 32,
@@ -92,13 +79,8 @@ def quantized_matmul_int8_fwd(
 
     x_q = jnp.pad(x_q, ((0, pm - m), (0, pk - k)))
     x_s = jnp.pad(x_s, (0, pm - m))
-    x_z = jnp.pad(x_z, (0, pm - m))
     w_q = jnp.pad(w_q, ((0, pn - n), (0, pk - k)))
     w_s = jnp.pad(w_s, (0, pn - n))
-    w_z = jnp.pad(w_z, (0, pn - n))
-
-    x_q_row_sum = jnp.sum(x_q, axis=1, dtype=x_s.dtype)
-    w_q_row_sum = jnp.sum(w_q, axis=1, dtype=w_s.dtype)
 
     grid = (pm // bm, pn // bn)
     out_shape = [
@@ -107,11 +89,7 @@ def quantized_matmul_int8_fwd(
     in_specs = [
         pl.BlockSpec((bm, pk), lambda i, j: (i, 0)),
         pl.BlockSpec((bm,), lambda i, j: (i,)),
-        pl.BlockSpec((bm,), lambda i, j: (i,)),
-        pl.BlockSpec((bm,), lambda i, j: (i,)),
         pl.BlockSpec((bn, pk), lambda i, j: (j, 0)),
-        pl.BlockSpec((bn,), lambda i, j: (j,)),
-        pl.BlockSpec((bn,), lambda i, j: (j,)),
         pl.BlockSpec((bn,), lambda i, j: (j,)),
     ]
     out_specs = [
@@ -120,15 +98,15 @@ def quantized_matmul_int8_fwd(
     compiler_params = plgpu.CompilerParams(num_warps, num_stages)
 
     kernel = functools.partial(
-        quantized_matmul_int8_fwd_kernel,
+        quantized_matmul_uint4_fwd_kernel,
         m=m, n=n, k=k, bm=bm, bn=bn, bk=bk,
         precision=precision, preferred_element_type=preferred_element_type)
-    kernel_name = f"quantized_matmul_int8_fwd_{bm}_{bk}_{bn}"
+    kernel_name = f"quantized_matmul_uint4_fwd_{bm}_{bk}_{bn}"
     kernel_call = pl.pallas_call(
         kernel, out_shape,
         grid=grid, in_specs=in_specs, out_specs=out_specs, compiler_params=compiler_params)
 
     with jax.named_scope(kernel_name):
-        out, = kernel_call(x_q, x_q_row_sum, x_s, x_z, w_q, w_q_row_sum, w_s, w_z)
+        out, = kernel_call(x_q, x_s, w_q, w_s)
 
     return out[:m, :n]
