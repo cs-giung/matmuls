@@ -23,6 +23,7 @@ explicit = true
 dev = [
     "ipykernel",
     "matplotlib",
+    "pytest",
     "tensorboard",
     "xprof",
 ]
