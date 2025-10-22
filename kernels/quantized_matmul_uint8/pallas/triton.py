@@ -67,7 +67,7 @@ def quantized_matmul_uint8_fwd(
     num_warps: int = 4,
     num_stages: int = 1,
     precision: jax.lax.PrecisionLike = None,
-    preferred_element_type: jax.typing.DTypeLike = jnp.uint32,
+    preferred_element_type: jax.typing.DTypeLike = jnp.int32,
 ):
     m, k = x_q.shape
     n, _ = w_q.shape
