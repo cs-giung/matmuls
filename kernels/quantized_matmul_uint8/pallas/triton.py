@@ -10,7 +10,7 @@ def _next_multiple(x: int, n: int) -> int:
     return x if r == 0 else x + (n - r)
 
 
-def quantized_matmul_int8_fwd_kernel(
+def quantized_matmul_uint8_fwd_kernel(
     x_q_ref: jax.Array, # [bm, pk]
     x_s_ref: jax.Array, # [bm,]
     w_q_ref: jax.Array, # [bn, pk]
@@ -55,7 +55,7 @@ def quantized_matmul_int8_fwd_kernel(
     plgpu.store(o_ref.at[:, :], o.astype(o_ref.dtype), mask=(m_mask[:, None] & n_mask[None, :]))
     
 
-def quantized_matmul_int8_fwd(
+def quantized_matmul_uint8_fwd(
     x_q: jax.Array, # [m, k]
     x_s: jax.Array, # [m,]
     w_q: jax.Array, # [n, k]
@@ -67,7 +67,7 @@ def quantized_matmul_int8_fwd(
     num_warps: int = 4,
     num_stages: int = 1,
     precision: jax.lax.PrecisionLike = None,
-    preferred_element_type: jax.typing.DTypeLike = jnp.int32,
+    preferred_element_type: jax.typing.DTypeLike = jnp.uint32,
 ):
     m, k = x_q.shape
     n, _ = w_q.shape
@@ -97,7 +97,7 @@ def quantized_matmul_int8_fwd(
     compiler_params = plgpu.CompilerParams(num_warps, num_stages)
 
     kernel = functools.partial(
-        quantized_matmul_int8_fwd_kernel,
+        quantized_matmul_uint8_fwd_kernel,
         m=m, n=n, k=k, bm=bm, bn=bn, bk=bk,
         precision=precision, preferred_element_type=preferred_element_type)
     kernel_name = f"quantized_matmul_int8_fwd_{bm}_{bk}_{bn}"
