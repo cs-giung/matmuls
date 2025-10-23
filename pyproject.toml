@@ -5,16 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "jax-triton==0.3.0",
+    "jax-triton",
     "jax[cuda12-local]==0.8.0",
-    "torch==2.8.0",
-    "triton==3.4.0"
+    "torch==2.9.0",
+    "triton==3.5.0",
 ]
 
 [tool.uv.sources]
-torch = [
-    { index = "pytorch-cu129" },
-]
+torch = { index = "pytorch-cu129" }
+jax-triton = { git = "https://github.com/jax-ml/jax-triton", rev = "0c6c888a7d350cb45aeb87210857b8cc76dd2e92" }
 
 [[tool.uv.index]]
 name = "pytorch-cu129"
