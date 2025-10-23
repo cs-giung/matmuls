@@ -11,11 +11,11 @@ def _next_multiple(x: int, n: int) -> int:
 
 
 def quantized_matmul_uint4_fwd_kernel(
-    x_q_ref: jax.Array, # [bm, pk]
-    x_s_ref: jax.Array, # [bm,]
-    w_q_ref: jax.Array, # [bn, pk]
-    w_s_ref: jax.Array, # [bn,]
-    o_ref: jax.Array, # [bm, bn]
+    x_q_ref: jax.Array,  # [bm, pk]
+    x_s_ref: jax.Array,  # [bm,]
+    w_q_ref: jax.Array,  # [bn, pk]
+    w_s_ref: jax.Array,  # [bn,]
+    o_ref: jax.Array,  # [bm, bn]
     *,
     m: int,
     n: int,
@@ -35,16 +35,22 @@ def quantized_matmul_uint4_fwd_kernel(
         k_mask = k_idx * bk + jnp.arange(bk) < k
         k_span = pl.dslice(k_idx * bk, bk)
         x_q = plgpu.load(
-            x_q_ref.at[:, k_span], mask=(m_mask[:, None] & k_mask[None, :]), other=0)
+            x_q_ref.at[:, k_span], mask=(m_mask[:, None] & k_mask[None, :]), other=0
+        )
         w_q = plgpu.load(
-            w_q_ref.at[:, k_span], mask=(n_mask[:, None] & k_mask[None, :]), other=0)
-        return jax.lax.dot(
-            # NOTE: upcast narrow-width integers
-            x_q.astype(jnp.uint8), w_q.astype(jnp.uint8),
-            dimension_numbers=(((1,), (1,)), ((), ())),
-            precision=precision,
-            preferred_element_type=preferred_element_type,
-        ) + o_prev
+            w_q_ref.at[:, k_span], mask=(n_mask[:, None] & k_mask[None, :]), other=0
+        )
+        return (
+            jax.lax.dot(
+                # NOTE: upcast narrow-width integers
+                x_q.astype(jnp.uint8),
+                w_q.astype(jnp.uint8),
+                dimension_numbers=(((1,), (1,)), ((), ())),
+                precision=precision,
+                preferred_element_type=preferred_element_type,
+            )
+            + o_prev
+        )
 
     o = jnp.zeros((bm, bn), dtype=preferred_element_type)
     o = jax.lax.fori_loop(0, pl.cdiv(k, bk), body, o)
@@ -53,14 +59,16 @@ def quantized_matmul_uint4_fwd_kernel(
     w_s = plgpu.load(w_s_ref.at[:], mask=n_mask, other=0.0)
     o = x_s[:, None] * w_s[None, :] * o.astype(x_s.dtype)
 
-    plgpu.store(o_ref.at[:, :], o.astype(o_ref.dtype), mask=(m_mask[:, None] & n_mask[None, :]))
-    
+    plgpu.store(
+        o_ref.at[:, :], o.astype(o_ref.dtype), mask=(m_mask[:, None] & n_mask[None, :])
+    )
+
 
 def quantized_matmul_uint4_fwd(
-    x_q: jax.Array, # [m, k]
-    x_s: jax.Array, # [m,]
-    w_q: jax.Array, # [n, k]
-    w_s: jax.Array, # [n,]
+    x_q: jax.Array,  # [m, k]
+    x_s: jax.Array,  # [m,]
+    w_q: jax.Array,  # [n, k]
+    w_s: jax.Array,  # [n,]
     *,
     bm: int = 32,
     bk: int = 32,
@@ -99,14 +107,26 @@ def quantized_matmul_uint4_fwd(
 
     kernel = functools.partial(
         quantized_matmul_uint4_fwd_kernel,
-        m=m, n=n, k=k, bm=bm, bn=bn, bk=bk,
-        precision=precision, preferred_element_type=preferred_element_type)
+        m=m,
+        n=n,
+        k=k,
+        bm=bm,
+        bn=bn,
+        bk=bk,
+        precision=precision,
+        preferred_element_type=preferred_element_type,
+    )
     kernel_name = f"quantized_matmul_uint4_fwd_{bm}_{bk}_{bn}"
     kernel_call = pl.pallas_call(
-        kernel, out_shape,
-        grid=grid, in_specs=in_specs, out_specs=out_specs, compiler_params=compiler_params)
+        kernel,
+        out_shape,
+        grid=grid,
+        in_specs=in_specs,
+        out_specs=out_specs,
+        compiler_params=compiler_params,
+    )
 
     with jax.named_scope(kernel_name):
-        out, = kernel_call(x_q, x_s, w_q, w_s)
+        (out,) = kernel_call(x_q, x_s, w_q, w_s)
 
     return out[:m, :n]
