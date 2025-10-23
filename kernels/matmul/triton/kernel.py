@@ -56,17 +56,24 @@ def matmul_fwd_kernel(
 
     m_span = pid_m * bm + tl.arange(0, bm)
     n_span = pid_n * bn + tl.arange(0, bn)
+    m_mask = m_span < m
+    n_mask = n_span < n
 
     o = tl.zeros((bm, bn), dtype=tl.float32)
     for k_idx in range(0, tl.cdiv(k, bk)):
         k_span = k_idx * bk + tl.arange(0, bk)
         k_mask = k_span < k
+
+        x_mask = m_mask[:, None] & k_mask[None, :]
         x_ptrs = x_ptr + k * (m_span % m)[:, None] + 1 * k_span[None, :]
+        x = tl.load(x_ptrs, mask=x_mask, other=0.0)
+
+        w_mask = n_mask[:, None] & k_mask[None, :]
         w_ptrs = w_ptr + k * (n_span % n)[:, None] + 1 * k_span[None, :]
-        x = tl.load(x_ptrs, mask=k_mask[None, :], other=0.0)
-        w = tl.load(w_ptrs, mask=k_mask[None, :], other=0.0)
+        w = tl.load(w_ptrs, mask=w_mask, other=0.0)
+
         o = tl.dot(x, w.T, o)
 
     o_ptrs = o_ptr + n * m_span[:, None] + 1 * n_span[None, :]
-    o_mask = (m_span < m)[:, None] & (n_span < n)[None, :]
+    o_mask = m_mask[:, None] & n_mask[None, :]
     tl.store(o_ptrs, o.to(tl.float16), mask=o_mask)
