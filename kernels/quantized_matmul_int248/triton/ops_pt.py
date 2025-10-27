@@ -19,9 +19,7 @@ def quantized_matmul_int248_fwd(
     if q_groupsize is None:
         q_groupsize = k // s.shape[1]
 
-    grid = lambda META: (  # noqa: E731
-        triton.cdiv(m, META["bm"]) * triton.cdiv(n, META["bn"]),
-    )
+    grid = lambda META: (triton.cdiv(m, META["bm"]) * triton.cdiv(n, META["bn"]),)
 
     o = torch.empty((m, n), device=x.device, dtype=torch.float16)
     quantized_matmul_int248_fwd_kernel[grid](

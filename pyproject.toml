@@ -30,3 +30,6 @@ dev = [
     "tensorboard",
     "xprof",
 ]
+
+[tool.ruff.lint]
+ignore = ["E731", "F722"]

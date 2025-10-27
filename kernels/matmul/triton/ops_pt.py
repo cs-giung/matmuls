@@ -10,9 +10,7 @@ def matmul_fwd(
     m, k = x.shape
     n, _ = w.shape
 
-    grid = lambda META: (  # noqa: E731
-        triton.cdiv(m, META["bm"]) * triton.cdiv(n, META["bn"]),
-    )
+    grid = lambda META: (triton.cdiv(m, META["bm"]) * triton.cdiv(n, META["bn"]),)
 
     o = torch.empty((m, n), device=x.device, dtype=torch.float16)
     matmul_fwd_kernel[grid](
