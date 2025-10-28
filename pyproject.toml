@@ -5,9 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "einops",
+    "huggingface-hub",
     "jax-triton",
     "jax[cuda12-local]==0.8.0",
-    "jaxtyping",
+    "ptwt",
+    "safetensors",
+    "sympy",
     "torch==2.9.0",
     "triton==3.5.0",
 ]
@@ -23,7 +27,9 @@ explicit = true
 
 [dependency-groups]
 dev = [
+    "beartype",
     "ipykernel",
+    "jaxtyping",
     "matplotlib",
     "pandas",
     "pytest",
