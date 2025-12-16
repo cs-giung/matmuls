@@ -1,17 +1,9 @@
+.agent
 .pytest_cache
 .ruff_cache
 .venv
 
-# Build artifacts
+*.pyc
 *.so
-build/
-dist/
-*.egg-info/
-tmp/
-.venv/
-__pycache__/
-.pytest_cache/
-.coverage
-htmlcov/
-pyc
-*.so
+
+tmp
