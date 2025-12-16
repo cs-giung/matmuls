@@ -19,7 +19,7 @@ def hadamard_transform(x: Any, *args, **kwargs):
         import torch
 
         if isinstance(x, torch.Tensor):
-            from .torch import hadamard_transform as _hadamard_torch
+            from .pt import hadamard_transform as _hadamard_torch
 
             return _hadamard_torch(x, *args, **kwargs)
     except ImportError:
@@ -32,7 +32,7 @@ def hadamard_transform(x: Any, *args, **kwargs):
         import jax
 
         if isinstance(x, (jax.Array, type(jax.numpy.array([])))):
-            from .jax import hadamard_transform as _hadamard_jax
+            from .jx import hadamard_transform as _hadamard_jax
 
             return _hadamard_jax(x, *args, **kwargs)
     except ImportError:

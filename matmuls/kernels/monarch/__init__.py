@@ -7,7 +7,7 @@ def monarch_transform(x: Any, w1: Any, w2: Any):
         import torch
 
         if isinstance(x, torch.Tensor):
-            from .torch import monarch_transform as _torch_impl
+            from .pt import monarch_transform as _torch_impl
 
             return _torch_impl(x, w1, w2)
     except ImportError:
@@ -18,7 +18,7 @@ def monarch_transform(x: Any, w1: Any, w2: Any):
         import jax
 
         if isinstance(x, (jax.Array, type(jax.numpy.array([])))):
-            from .jax import monarch_transform as _jax_impl
+            from .jx import monarch_transform as _jax_impl
 
             return _jax_impl(x, w1, w2)
     except ImportError:
