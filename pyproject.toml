@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "matmuls"
 version = "0.1.0"
@@ -5,14 +9,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "datasets",
     "einops",
-    "huggingface-hub",
+    "huggingface-hub[cli]",
     "jax-triton",
     "jax[cuda12-local]==0.8.0",
-    "ptwt",
+    "lm-eval",
     "safetensors",
     "sympy",
     "torch==2.9.0",
+    "transformers",
     "triton==3.5.0",
 ]
 
@@ -33,6 +39,8 @@ dev = [
     "matplotlib",
     "pandas",
     "pytest",
+    "scipy",
+    "ninja",
     "tensorboard",
     "xprof",
 ]
