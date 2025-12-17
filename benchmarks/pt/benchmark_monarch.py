@@ -40,7 +40,8 @@ CONFIGS = [
     (16, 16, 16, 16),
     (32, 32, 32, 32),
     (64, 64, 64, 64),
-    (16, 64, 64, 16),  # Mix
+    (128, 86, 128, 86),
+    (128, 86, 128, 128),
 ]
 
 TARGET_ELEMENTS = 2**24  # Approx load control
@@ -53,12 +54,10 @@ def get_batch_size(n_elements):
     return max(1, TARGET_ELEMENTS // n_elements)
 
 
-def benchmark_torch(config):
+def benchmark_torch(config, batch_size):
     n1, n2, m1, m2 = config
     N = n1 * n2
-    batch_size = get_batch_size(N)
 
-    print(f"  PyTorch | N={N}, Batch={batch_size}, Config={config}")
     if not torch.cuda.is_available():
         return float("nan"), float("nan")
 
@@ -114,20 +113,22 @@ def main():
     for config in CONFIGS:
         n1, n2, m1, m2 = config
         N = n1 * n2
-        batch = get_batch_size(N)
 
-        try:
-            t_ref, t_kern = benchmark_torch(config)
-            t_speedup = t_ref / t_kern if t_kern > 0 else 0
-            cfg_str = f"{n1}x{n2}x{m1}x{m2}"
-            print(
-                f"{cfg_str:<20} {batch:<8} {'Torch':<8} {t_ref:<12.4f} {t_kern:<12.4f} {t_speedup:<8.2f}x"
-            )
-        except Exception as e:
-            print(f"Torch failed for {config}: {e}")
-            import traceback
+        calculated_batch = get_batch_size(N)
+        batches_to_test = sorted(list(set([1, 16, calculated_batch])))
 
-            traceback.print_exc()
+        for batch in batches_to_test:
+            try:
+                t_ref, t_kern = benchmark_torch(config, batch)
+                t_speedup = t_ref / t_kern if t_kern > 0 else 0
+                cfg_str = f"{n1}x{n2}x{m1}x{m2}"
+                print(
+                    f"{cfg_str:<20} {batch:<8} {'Torch':<8} {t_ref:<12.4f} {t_kern:<12.4f} {t_speedup:<8.2f}x"
+                )
+            except Exception as e:
+                print(f"Torch failed for {config}, Batch={batch}: {e}")
+                # import traceback
+                # traceback.print_exc()
 
         print("-" * 75)
 

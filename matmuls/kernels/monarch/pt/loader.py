@@ -26,16 +26,39 @@ def monarch_transform(x, w1, w2):
     out = torch.empty((batch, Q, S), device=x.device, dtype=x.dtype)
 
     BLOCK_B = 16
+    BLOCK_M1 = 16
+    BLOCK_S = 64  # Tile S to manage register pressure
 
     BLOCK_N1 = triton.next_power_of_2(P)
     BLOCK_K = triton.next_power_of_2(K)
-    BLOCK_S = triton.next_power_of_2(S)
 
-    # Tile M1 dimension to improve occupancy and reduce spill
-    # Set tile size for M1 (Q)
-    BLOCK_M1 = 16  # Process 16 Qs per kernel instance
+    # Split-K Heuristic for Small Batch Occupancy
+    # A6000 has ~84 SMs. Target at least 84 blocks.
+    num_blocks_batch = triton.cdiv(batch, BLOCK_B)
+    num_blocks_q = triton.cdiv(Q, BLOCK_M1)
+    num_blocks_s = triton.cdiv(S, BLOCK_S)
+    total_blocks = num_blocks_batch * num_blocks_q * num_blocks_s
 
-    grid = (triton.cdiv(batch, BLOCK_B), triton.cdiv(Q, BLOCK_M1))
+    SPLIT_K = 1
+    # Only split if occupancy is low and K is large enough
+    if total_blocks < 84 and K >= 16:
+        # Try to fill GPU. Max Split factor: 8 (or K/16)
+        split_factor = min(84 // total_blocks, 8)
+        split_factor = max(1, split_factor)  # Minimum 1
+        # Also ensure chunk size is reasonable (target at least 16)
+        if K // split_factor >= 16:
+            SPLIT_K = split_factor
+
+    # Initialize Output to Zero if Split-K is used (atomic accumulation)
+    if SPLIT_K > 1:
+        out.zero_()
+
+    # Grid: (Batch * SPLIT_K, Q, S)
+    grid = (
+        num_blocks_batch * SPLIT_K,
+        num_blocks_q,
+        num_blocks_s,
+    )
 
     monarch_kernel[grid](
         x_view,
@@ -66,6 +89,7 @@ def monarch_transform(x, w1, w2):
         BLOCK_S=BLOCK_S,
         BLOCK_K_TILE=16,
         BLOCK_P_TILE=32,
+        SPLIT_K=SPLIT_K,
     )
 
     return out.view(batch, -1)

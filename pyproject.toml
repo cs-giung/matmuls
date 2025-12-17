@@ -18,6 +18,7 @@ dependencies = [
     "safetensors",
     "sympy",
     "torch==2.9.0",
+    "torchvision",
     "transformers",
     "triton==3.5.0",
 ]

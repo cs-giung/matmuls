@@ -64,13 +64,18 @@ def monarch_transform(x, w1, w2):
     stride_out_b = Q * S
 
     # Constants
+    # Constants
     BLOCK_B = 16
+    BLOCK_M1 = 16
+    BLOCK_S = 64
     BLOCK_N1 = triton.next_power_of_2(P)
     BLOCK_K = triton.next_power_of_2(K)
-    BLOCK_S = triton.next_power_of_2(S)
-    BLOCK_M1 = 16  # Same as PyTorch impl
 
-    grid = (triton.cdiv(Batch, BLOCK_B), triton.cdiv(Q, BLOCK_M1))
+    grid = (
+        triton.cdiv(Batch, BLOCK_B),
+        triton.cdiv(Q, BLOCK_M1),
+        triton.cdiv(S, BLOCK_S),
+    )
 
     out_shape = jax.ShapeDtypeStruct((Batch, Q, S), x.dtype)
 
@@ -109,6 +114,7 @@ def monarch_transform(x, w1, w2):
         BLOCK_S=BLOCK_S,
         BLOCK_K_TILE=16,
         BLOCK_P_TILE=32,
+        SPLIT_K=1,
     )
 
     # Reshape Out to (Batch..., M)
