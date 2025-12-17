@@ -71,13 +71,30 @@ def monarch_transform(x, w1, w2):
     BLOCK_N1 = triton.next_power_of_2(P)
     BLOCK_K = triton.next_power_of_2(K)
 
+    # Split-K Heuristic for Small Batch Occupancy
+    num_blocks_batch = triton.cdiv(Batch, BLOCK_B)
+    num_blocks_q = triton.cdiv(Q, BLOCK_M1)
+    num_blocks_s = triton.cdiv(S, BLOCK_S)
+    total_blocks = num_blocks_batch * num_blocks_q * num_blocks_s
+
+    SPLIT_K = 1
+    # Only split if occupancy is low and K is large enough
+    if total_blocks < 84 and K >= 16:
+        split_factor = min(84 // total_blocks, 8)
+        split_factor = max(1, split_factor)
+        if K // split_factor >= 16:
+            SPLIT_K = split_factor
+
     grid = (
-        triton.cdiv(Batch, BLOCK_B),
-        triton.cdiv(Q, BLOCK_M1),
-        triton.cdiv(S, BLOCK_S),
+        num_blocks_batch * SPLIT_K,
+        num_blocks_q,
+        num_blocks_s,
     )
 
     out_shape = jax.ShapeDtypeStruct((Batch, Q, S), x.dtype)
+
+    # Zero init output if Split-K is used (atomics)
+    zeroed_outputs = (0,) if SPLIT_K > 1 else ()
 
     out = jt.triton_call(
         x_view,
@@ -114,7 +131,9 @@ def monarch_transform(x, w1, w2):
         BLOCK_S=BLOCK_S,
         BLOCK_K_TILE=16,
         BLOCK_P_TILE=32,
-        SPLIT_K=1,
+        SPLIT_K=SPLIT_K,
+        # JAX Triton features
+        zeroed_outputs=zeroed_outputs,
     )
 
     # Reshape Out to (Batch..., M)
