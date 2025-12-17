@@ -1,13 +1,3 @@
-import os
-import sys
-
-# Add root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-# hadamard_reference was likely in root or tests?
-# Let's check where hadamard_reference is. It was not explicitly mentioned.
-# Assuming it's in the root or accessible.
-# Actually I see `from hadamard_reference import hadamard_transform_ref` in my previous output.
-# I need to find where `hadamard_reference.py` is.
 import math
 
 import scipy.linalg
@@ -27,24 +17,17 @@ def get_batch_size(n):
 
 
 def benchmark_torch(n, batch_size):
-    print(f"  PyTorch | N={n}, Batch={batch_size}")
-    if not torch.cuda.is_available():
-        return float("nan"), float("nan")
-
     # Setup
     torch.manual_seed(0)
     x = torch.randn((batch_size, n), device="cuda", dtype=torch.float16) * 0.1
 
-    # Reference (Matrix Multiplication)
+    # Reference
     with torch.no_grad():
-        # Precompute H on GPU
         try:
-            # Generate H on CPU first
             h_cpu = scipy.linalg.hadamard(n)
             scale = 1.0 / math.sqrt(n)
             H = torch.tensor(h_cpu, device="cuda", dtype=torch.float16) * scale
-        except Exception as e:
-            print(f"    Failed to allocate Ref Matrix: {e}")
+        except Exception:
             H = None
 
         start_event = torch.cuda.Event(enable_timing=True)

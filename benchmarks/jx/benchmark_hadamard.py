@@ -19,19 +19,15 @@ def get_batch_size(n):
 
 
 def benchmark_jax(n, batch_size):
-    print(f"  JAX     | N={n}, Batch={batch_size}")
-
     # Setup
     key = jax.random.PRNGKey(0)
     x = jax.random.normal(key, (batch_size, n), dtype=jnp.float16) * 0.1
-    x = jax.device_put(x)
 
     # Reference
     try:
         h_cpu = scipy.linalg.hadamard(n)
         scale = 1.0 / math.sqrt(n)
         H = jnp.array(h_cpu, dtype=jnp.float16) * scale
-        H = jax.device_put(H)
     except Exception:
         H = None
 
@@ -51,11 +47,11 @@ def benchmark_jax(n, batch_size):
             ref_op(x, H).block_until_ready()
 
         # Measure
-        start = time.time()
+        start = time.perf_counter()
         for _ in range(ITERS):
             out = ref_op(x, H)
         out.block_until_ready()
-        end = time.time()
+        end = time.perf_counter()
         ref_time = (end - start) * 1000 / ITERS
 
     # Benchmark Kernel
@@ -64,11 +60,11 @@ def benchmark_jax(n, batch_size):
         kernel_op(x).block_until_ready()
 
     # Measure
-    start = time.time()
+    start = time.perf_counter()
     for _ in range(ITERS):
         out = kernel_op(x)
     out.block_until_ready()
-    end = time.time()
+    end = time.perf_counter()
     kernel_time = (end - start) * 1000 / ITERS
 
     return ref_time, kernel_time
