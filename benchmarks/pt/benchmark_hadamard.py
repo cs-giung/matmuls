@@ -17,7 +17,7 @@ from matmuls.kernels.hadamard import hadamard_transform
 
 # Constants
 TARGET_ELEMENTS = 2**24  # ~16M elements (32MB for fp16)
-SIZES = [256, 1024, 4096, 16384, 32768]
+SIZES = [256, 1024, 4096, 16384]
 WARMUP = 10
 ITERS = 100
 
@@ -90,20 +90,23 @@ def main():
     print("-" * 65)
 
     for n in SIZES:
-        batch = get_batch_size(n)
+        large_batch = get_batch_size(n)
+        batch_sizes = [1, 16]
+        if large_batch > 16:
+            batch_sizes.append(large_batch)
 
-        # Run Torch
-        try:
-            t_ref, t_kern = benchmark_torch(n, batch)
-            t_speedup = t_ref / t_kern if t_kern > 0 else 0
-            print(
-                f"{n:<8} {batch:<8} {'Torch':<8} {t_ref:<12.4f} {t_kern:<12.4f} {t_speedup:<8.2f}x"
-            )
-        except Exception as e:
-            print(f"Torch failed for {n}: {e}")
-            import traceback
-
-            traceback.print_exc()
+        for batch in batch_sizes:
+            # Run Torch
+            try:
+                t_ref, t_kern = benchmark_torch(n, batch)
+                t_speedup = t_ref / t_kern if t_kern > 0 else 0
+                print(
+                    f"{n:<8} {batch:<8} {'Torch':<8} {t_ref:<12.4f} {t_kern:<12.4f} {t_speedup:<8.2f}x"
+                )
+            except Exception as e:
+                print(f"Torch failed for {n} B={batch}: {e}")
+                # import traceback
+                # traceback.print_exc()
 
         print("-" * 65)
 
