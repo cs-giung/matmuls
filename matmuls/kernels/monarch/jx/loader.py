@@ -1,181 +1,115 @@
-import ctypes
-import os
-import subprocess
-import sys
-
 import jax
 import jax.numpy as jnp
-import jaxlib
-import numpy as np
-import torch
-
-_cur_dir = os.path.dirname(os.path.abspath(__file__))
-_lib_path = os.path.join(_cur_dir, "libmonarch_jax.so")
-
-
-def _get_cuda_arch_flags() -> list[str]:
-    if not torch.cuda.is_available():
-        return []
-    major, minor = torch.cuda.get_device_capability()
-    return ["-gencode", f"arch=compute_{major}{minor},code=sm_{major}{minor}"]
-
-
-def build_jax_extension():
-    output_lib = _lib_path
-    core_dir = os.path.join(
-        os.path.dirname(os.path.dirname(_cur_dir)), "kernels", "monarch", "core"
-    )
-    # Logic: _cur_dir = .../matmuls/kernels/monarch/jax. Up 2 levels to kernels/monarch?
-    # No, os.path.dirname(_cur_dir) is .../matmuls/kernels/monarch.
-    core_dir = os.path.join(os.path.dirname(_cur_dir), "core")
-
-    src_cuda = os.path.join(core_dir, "monarch_cuda.cu")
-    src_jax = os.path.join(_cur_dir, "monarch_jax.cu")
-
-    jaxlib_dir = os.path.dirname(jaxlib.__file__)
-    include_dirs = [
-        os.path.join(jaxlib_dir, "include"),
-        "/usr/local/cuda/include",
-        core_dir,
-        _cur_dir,
-    ]
-
-    nvcc_cmd = [
-        "nvcc",
-        "-O3",
-        "--shared",
-        "-std=c++17",
-        "--compiler-options",
-        "-fPIC",
-        "-o",
-        output_lib,
-        src_cuda,
-        src_jax,
-        "-lcublas",
-    ]
-
-    nvcc_cmd.extend(_get_cuda_arch_flags())
-
-    for inc in include_dirs:
-        nvcc_cmd.extend(["-I", inc])
-
-    print(f"Build command: {' '.join(nvcc_cmd)}")
-
-    try:
-        subprocess.check_call(nvcc_cmd)
-        print(f"Successfully built {output_lib}")
-    except subprocess.CalledProcessError as e:
-        print(f"Build failed with error: {e}")
-        sys.exit(1)
-
-
-def _load_library():
-    if not os.path.exists(_lib_path):
-        print(f"Building JAX extension at {_lib_path}...")
-        build_jax_extension()
-
-    try:
-        lib = ctypes.cdll.LoadLibrary(_lib_path)
-    except OSError:
-        # Rebuild if load fails (e.g. wrong architecture)
-        print("Load failed. Rebuilding...")
-        build_jax_extension()
-        lib = ctypes.cdll.LoadLibrary(_lib_path)
-
-    try:
-        jax.ffi.register_ffi_target(
-            "monarch_f16", jax.ffi.pycapsule(lib.MonarchF16Symbol), platform="CUDA"
-        )
-        jax.ffi.register_ffi_target(
-            "monarch_bf16", jax.ffi.pycapsule(lib.MonarchBF16Symbol), platform="CUDA"
-        )
-    except AttributeError:
-        # Rebuild if symbols missing
-        print("Symbols missing. Rebuilding...")
-        build_jax_extension()
-        lib = ctypes.cdll.LoadLibrary(_lib_path)
-        jax.ffi.register_ffi_target(
-            "monarch_f16", jax.ffi.pycapsule(lib.MonarchF16Symbol), platform="CUDA"
-        )
-        jax.ffi.register_ffi_target(
-            "monarch_bf16", jax.ffi.pycapsule(lib.MonarchBF16Symbol), platform="CUDA"
-        )
-
-    return lib
-
-
-_lib = _load_library()
+import jax_triton as jt
+import triton
+from ..core.monarch_triton import monarch_kernel
 
 
 def monarch_transform(x, w1, w2):
     """
-    Monarch Matrix Multiplication (JAX).
+    Monarch Matrix Multiplication (JAX + Triton).
 
-    Args:
-        x: (..., n1*n2) input. View as (Batch, n2, n1) internally?
-           Reference implementation expects x to be (Batch, N).
-           But our kernel assumes Flattened Batch or handles broadcast.
-           Kernel params: batch, n1, n2.
-           Implies x is treated as (Batch, n2, n1).
-           But actually x is likely passed as (Batch, N).
-           Reference: n2 blocks of (m1, n1).
-           x should be viewed as (..., n2, n1).
+    x: (..., N) or (..., K, P) - flattened N=K*P
+    w1: (K, Q, P)
+    w2: (Q, S, K)
+
+    Returns: (..., M) where M=Q*S
     """
     # Shapes
-    n2, m1, n1 = w1.shape
-    assert w2.shape[0] == m1, f"w2 dim 0 ({w2.shape[0]}) != w1 dim 1 ({m1})"
-    m2 = w2.shape[1]
-    assert w2.shape[2] == n2, f"w2 dim 2 ({w2.shape[2]}) != w1 dim 0 ({n2})"
-
-    # Flatten x to (Batch, N) or ensure last dim is N
-    N = n1 * n2
-    assert x.shape[-1] == N
-
-    # We treat all leading dims as batch
+    # x might be (Batch..., N)
     batch_shape = x.shape[:-1]
-    batch_dim = 1
-    for d in batch_shape:
-        batch_dim *= d
 
-    # Out shape
-    M = m1 * m2
-    out_shape = batch_shape + (M,)
+    n2_w1, m1, n1 = w1.shape  # K, Q, P
+    m1_check, m2, n2_w2 = w2.shape  # Q, S, K
 
-    # Output dtype
-    dtype = x.dtype
+    assert n2_w1 == n2_w2, f"K mismatch: {n2_w1} vs {n2_w2}"
+    assert m1 == m1_check, f"Q mismatch: {m1} vs {m1_check}"
 
-    # Prepare Output
-    out_type = jax.ShapeDtypeStruct(out_shape, x.dtype)
+    K, Q, P = n2_w1, m1, n1
+    S = m2
+    N = K * P
+    M = Q * S
 
-    # Workspace size
-    # y1 + y1_perm + y2
-    # Size = batch * m1 * (2*n2 + m2)
-    workspace_shape = (batch_dim * m1 * (2 * n2 + m2),)
-    workspace_type = jax.ShapeDtypeStruct(workspace_shape, x.dtype)
+    # Flatten Batch
+    # Reshape x to (TotalBatch, K, P) assuming contiguous layout (handled by reshape/Jit)
+    # Note: JAX arrays are immutable. reshape creates a view/copy.
+    x_view = x.reshape(-1, K, P)
+    Batch = x_view.shape[0]
 
-    # Call FFI
-    # Note: FFI expects buffers. x_flat might invoke copy if not contiguous.
-    # vmap_method="broadcast_all" allows automatic vmap handling if we passed unbatched inputs,
-    # but here we manually handle batch.
+    # Check dimensions
+    # x input could be (..., N). last dim must be N=K*P.
+    assert x.shape[-1] == N or (x.shape[-2] == K and x.shape[-1] == P)
 
-    if dtype == jnp.float16:
-        name = "monarch_f16"
-    elif dtype == jnp.bfloat16:
-        name = "monarch_bf16"
-    else:
-        raise TypeError("Unsupported dtype")
+    # Prepare Strides assuming standard layout (C-contiguous)
+    # If inputs are not contiguous, JAX/Triton might copy?
+    # We pass strides based on the SHAPE we assume.
+    # If the underlying buffer is transposed, this might fail unless we check.
+    # But JAX generally provides standard layout arrays inside jit unless specialized.
+    # We will assume row-major.
 
-    out, _ = jax.ffi.ffi_call(
-        name, (out_type, workspace_type), vmap_method="broadcast_all"
-    )(
-        x,
+    stride_xp = 1
+    stride_xk = P
+    stride_xb = K * P
+
+    stride_w1p = 1
+    stride_w1q = P
+    stride_w1k = Q * P
+
+    stride_w2k = 1
+    stride_w2s = K
+    stride_w2q = S * K
+
+    stride_out_s = 1
+    stride_out_q = S
+    stride_out_b = Q * S
+
+    # Constants
+    BLOCK_B = 16
+    BLOCK_N1 = triton.next_power_of_2(P)
+    BLOCK_K = triton.next_power_of_2(K)
+    BLOCK_S = triton.next_power_of_2(S)
+    BLOCK_M1 = 16  # Same as PyTorch impl
+
+    grid = (triton.cdiv(Batch, BLOCK_B), triton.cdiv(Q, BLOCK_M1))
+
+    out_shape = jax.ShapeDtypeStruct((Batch, Q, S), x.dtype)
+
+    out = jt.triton_call(
+        x_view,
         w1,
         w2,
-        batch=np.int32(batch_dim),
-        n1=np.int32(n1),
-        n2=np.int32(n2),
-        m1=np.int32(m1),
-        m2=np.int32(m2),
+        kernel=monarch_kernel,
+        out_shape=out_shape,
+        grid=grid,
+        # Kernel Arguments (Positional pointers handled by jt)
+        # Named arguments:
+        Batch=Batch,
+        N1=P,
+        K=K,
+        M1=Q,
+        S=S,
+        # Strides
+        stride_xb=stride_xb,
+        stride_xk=stride_xk,
+        stride_xp=stride_xp,
+        stride_w1k=stride_w1k,
+        stride_w1q=stride_w1q,
+        stride_w1p=stride_w1p,
+        stride_w2q=stride_w2q,
+        stride_w2s=stride_w2s,
+        stride_w2k=stride_w2k,
+        stride_out_b=stride_out_b,
+        stride_out_q=stride_out_q,
+        stride_out_s=stride_out_s,
+        # Meta-parameters
+        BLOCK_B=BLOCK_B,
+        BLOCK_N1=BLOCK_N1,
+        BLOCK_K=BLOCK_K,
+        BLOCK_M1=BLOCK_M1,
+        BLOCK_S=BLOCK_S,
+        BLOCK_K_TILE=16,
+        BLOCK_P_TILE=32,
     )
 
-    return out
+    # Reshape Out to (Batch..., M)
+    return out.reshape(*batch_shape, M)

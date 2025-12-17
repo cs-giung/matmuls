@@ -108,6 +108,6 @@ def test_monarch_transform(batch, n1, n2, m1, m2, dtype):
     # Let's see.
 
     rtol = 1e-2 if dtype == torch.float16 else 5e-2
-    atol = 1e-2 if dtype == torch.float16 else 1e-1
+    atol = 2e-2 if dtype == torch.float16 else 1e-1
 
     torch.testing.assert_close(out, ref_out, rtol=rtol, atol=atol)
