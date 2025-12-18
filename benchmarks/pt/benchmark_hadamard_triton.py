@@ -3,7 +3,7 @@ import math
 import scipy.linalg
 import torch
 
-from matmuls.kernels.hadamard import hadamard_transform
+from matmuls.kernels.hadamard import hadamard_transform_triton
 
 # Constants
 TARGET_ELEMENTS = 2**24  # ~16M elements (32MB for fp16)
@@ -52,13 +52,13 @@ def benchmark_torch(n, batch_size):
         # Benchmark Kernel
         # Warmup
         for _ in range(WARMUP):
-            hadamard_transform(x)
+            hadamard_transform_triton(x)
         torch.cuda.synchronize()
 
         # Measure
         start_event.record()
         for _ in range(ITERS):
-            hadamard_transform(x)
+            hadamard_transform_triton(x)
         end_event.record()
         torch.cuda.synchronize()
         kernel_time = start_event.elapsed_time(end_event) / ITERS
@@ -84,7 +84,7 @@ def main():
                 t_ref, t_kern = benchmark_torch(n, batch)
                 t_speedup = t_ref / t_kern if t_kern > 0 else 0
                 print(
-                    f"{n:<8} {batch:<8} {'Torch':<8} {t_ref:<12.4f} {t_kern:<12.4f} {t_speedup:<8.2f}x"
+                    f"{n:<8} {batch:<8} {'Triton':<8} {t_ref:<12.4f} {t_kern:<12.4f} {t_speedup:<8.2f}x"
                 )
             except Exception as e:
                 print(f"Torch failed for {n} B={batch}: {e}")

@@ -1,1 +1,1 @@
-from .loader import hadamard_transform
+from .loader import hadamard_transform_cuda, hadamard_transform_triton

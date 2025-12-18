@@ -2,15 +2,31 @@ import ctypes
 import os
 import subprocess
 import sys
+import math
 
 import jax
 import jax.numpy as jnp
 import jaxlib
 import numpy as np
 import torch
+import jax_triton as jt
+from scipy.linalg import hadamard
+
+from matmuls.kernels.hadamard.core.hadamard_triton import hadamard_fused_kernel
 
 _cur_dir = os.path.dirname(os.path.abspath(__file__))
 _lib_path = os.path.join(_cur_dir, "libhadamard_jax.so")
+
+
+def _get_hadamard_matrix_jax(n, dtype):
+    if not (n & (n - 1) == 0):
+        raise ValueError(f"N must be power of 2, got {n}")
+    # Create using scipy, convert to numpy then JAX
+    h_np = hadamard(n)
+    h = jnp.array(h_np, dtype=dtype)
+    # Normalize to match FHT library (1/sqrt(N)) scaling per dims
+    h = h / math.sqrt(n)
+    return h
 
 
 def _get_cuda_arch_flags() -> list[str]:
@@ -122,9 +138,9 @@ def _load_library():
 _lib = _load_library()
 
 
-def hadamard_transform(x):
+def hadamard_transform_cuda(x):
     """
-    Apply Fast Hadamard Transform to the input tensor (JAX).
+    Apply Fast Hadamard Transform to the input tensor (JAX) using CUDA implementation.
 
     Args:
         x (jax.Array): Input array. Must be on GPU and have dtype float16 or bfloat16.
@@ -173,4 +189,79 @@ def hadamard_transform(x):
         out = out[:-pad_rows]
 
     # Reshape back
+    return out.reshape(original_shape)
+
+
+def hadamard_transform_triton(x):
+    """
+    Apply Fast Hadamard Transform to the input tensor (JAX) using Triton implementation.
+    """
+    had_size = x.shape[-1]
+    original_shape = x.shape
+    dtype = x.dtype
+
+    B_total = int(np.prod(x.shape[:-1]))
+    N = had_size
+
+    log_n = int(math.log2(N))
+    n1_bits = log_n // 2
+    n2_bits = log_n - n1_bits
+
+    N1 = 1 << n1_bits
+    N2 = 1 << n2_bits
+
+    # Prepare inputs
+    x_reshaped = x.reshape(B_total, N1, N2)
+
+    # Get Hadamard matrices
+    h1 = _get_hadamard_matrix_jax(N1, dtype)
+    h2 = _get_hadamard_matrix_jax(N2, dtype)
+
+    # Compute strides
+    # Assume contiguous layout for reshaped
+    stride_xb = N1 * N2
+    stride_xh = N2
+    stride_xw = 1
+
+    stride_h1_r = h1.shape[1]  # row major
+    stride_h1_c = 1
+    stride_h2_r = h2.shape[1]
+    stride_h2_c = 1
+
+    stride_out_b = N1 * N2
+    stride_out_h = N2
+    stride_out_w = 1
+
+    BLOCK_SIZE_B = 1
+    BLOCK_SIZE_N1 = N1
+    BLOCK_SIZE_N2 = N2
+
+    out_shape = jax.ShapeDtypeStruct((B_total, N1, N2), dtype)
+
+    grid = (B_total,)
+
+    out = jt.triton_call(
+        x_reshaped,
+        h1,
+        h2,
+        B_total,
+        stride_xb,
+        stride_xh,
+        stride_xw,
+        stride_h1_r,
+        stride_h1_c,
+        stride_h2_r,
+        stride_h2_c,
+        stride_out_b,
+        stride_out_h,
+        stride_out_w,
+        BLOCK_SIZE_B=BLOCK_SIZE_B,
+        BLOCK_SIZE_N1=BLOCK_SIZE_N1,
+        BLOCK_SIZE_N2=BLOCK_SIZE_N2,
+        kernel=hadamard_fused_kernel,
+        out_shape=out_shape,
+        grid=grid,
+        num_warps=4,
+    )
+
     return out.reshape(original_shape)

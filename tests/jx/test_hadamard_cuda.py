@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import scipy.linalg
 
-from matmuls.kernels.hadamard import hadamard_transform
+from matmuls.kernels.hadamard import hadamard_transform_cuda
 
 
 def get_scale(size):
@@ -26,7 +26,7 @@ def test_hadamard_transform(m, dtype):
     expected = a @ truth_hadamard
 
     # Module implementation
-    out = hadamard_transform(a)
+    out = hadamard_transform_cuda(a)
 
     # Verification
     # Transfer to numpy for easy comparison

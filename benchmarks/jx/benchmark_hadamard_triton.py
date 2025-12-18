@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import scipy.linalg
 
-from matmuls.kernels.hadamard import hadamard_transform
+from matmuls.kernels.hadamard import hadamard_transform_triton
 
 # Constants
 TARGET_ELEMENTS = 2**24  # ~16M elements (32MB for fp16)
@@ -37,7 +37,7 @@ def benchmark_jax(n, batch_size):
 
     @jax.jit
     def kernel_op(x):
-        return hadamard_transform(x)
+        return hadamard_transform_triton(x)
 
     # Benchmark Reference
     ref_time = float("inf")
@@ -88,7 +88,7 @@ def main():
                 j_ref, j_kern = benchmark_jax(n, batch)
                 j_speedup = j_ref / j_kern if j_kern > 0 else 0
                 print(
-                    f"{n:<8} {batch:<8} {'JAX':<8} {j_ref:<12.4f} {j_kern:<12.4f} {j_speedup:<8.2f}x"
+                    f"{n:<8} {batch:<8} {'Triton':<8} {j_ref:<12.4f} {j_kern:<12.4f} {j_speedup:<8.2f}x"
                 )
             except Exception as e:
                 print(f"JAX failed for {n} B={batch}: {e}")

@@ -5,7 +5,7 @@ import pytest
 import scipy.linalg
 import torch
 
-from matmuls.kernels.hadamard import hadamard_transform
+from matmuls.kernels.hadamard import hadamard_transform_cuda
 
 
 def get_scale(size):
@@ -30,7 +30,7 @@ def test_hadamard_transform(m, dtype):
     # Original test called: faster_hadamard_transform.hadamard_transform(a, inplace=True)
 
     input_tensor = a.clone()
-    hadamard_transform(input_tensor, inplace=True)
+    hadamard_transform_cuda(input_tensor, inplace=True)
 
     # Higher tolerance for BF16
     atol = 1e-2 if dtype == torch.float16 else 5e-2

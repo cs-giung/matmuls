@@ -3,6 +3,10 @@ import os
 import torch
 from torch.utils.cpp_extension import load
 
+from matmuls.kernels.hadamard.core.hadamard_triton import (
+    hadamard_triton as _hadamard_triton_impl,
+)
+
 _cur_dir = os.path.dirname(os.path.abspath(__file__))
 
 _hadamard = None
@@ -51,9 +55,9 @@ def _load_hadamard_extension():
     return _hadamard
 
 
-def hadamard_transform(x: torch.Tensor, inplace: bool = False) -> torch.Tensor:
+def hadamard_transform_cuda(x: torch.Tensor, inplace: bool = False) -> torch.Tensor:
     """
-    Apply Fast Hadamard Transform to the input tensor.
+    Apply Fast Hadamard Transform to the input tensor (CUDA).
 
     Args:
         x (torch.Tensor): Input tensor. Must be on CUDA and have dtype float16 or bfloat16.
@@ -65,3 +69,16 @@ def hadamard_transform(x: torch.Tensor, inplace: bool = False) -> torch.Tensor:
     """
     module = _load_hadamard_extension()
     return module.hadamard_transform(x, inplace)
+
+
+def hadamard_transform_triton(x: torch.Tensor) -> torch.Tensor:
+    """
+    Apply Fast Hadamard Transform to the input tensor (Triton).
+
+    Args:
+        x (torch.Tensor): Input tensor. Must be on CUDA.
+
+    Returns:
+        torch.Tensor: The transformed tensor.
+    """
+    return _hadamard_triton_impl(x)
