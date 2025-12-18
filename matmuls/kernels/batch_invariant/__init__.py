@@ -1,31 +1,20 @@
-from typing import Any
+import jax
+import torch
+from jaxtyping import Array, Float
 
 
-def matmul(a: Any, b: Any):
-    # Check for PyTorch
-    try:
-        import torch
+def matmul(a: Float[Array, "M K"], b: Float[Array, "K N"]):
+    if isinstance(a, torch.Tensor):
+        from .pt import matmul as _func
 
-        if isinstance(a, torch.Tensor):
-            from .pt import matmul as _torch_impl
+        return _func(a, b)
 
-            return _torch_impl(a, b)
-    except ImportError:
-        pass
+    if isinstance(a, jax.Array):
+        from .jx import matmul as _func
 
-    # Check for JAX
-    try:
-        import jax
-        import jax.numpy as jnp
-
-        if isinstance(a, (jax.Array, type(jnp.array([])))):
-            from .jx import matmul as _jax_impl
-
-            return _jax_impl(a, b)
-    except ImportError:
-        pass
+        return _func(a, b)
 
     raise TypeError(
         f"Unsupported input type: {type(a).__name__}. "
-        "Expected torch.Tensor or jax.Array."
+        f"Expected torch.Tensor or jax.Array."
     )

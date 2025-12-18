@@ -1,8 +1,41 @@
+import functools
+import subprocess
+
 import jax
 import jax.numpy as jnp
 import jax_triton as jt
 import triton
 from matmuls.kernels.batch_invariant.core.matmul_triton import matmul_kernel_persistent
+
+
+@functools.lru_cache()
+def _get_num_sms():
+    # Attempt to deduce SM count from GPU name via nvidia-smi
+    # Mapping for common GPUs in ML
+    # This avoids torch dependency
+    SM_COUNTS = {
+        "H100": 132,
+        "A100": 108,
+        "A6000": 84,
+        "RTX 4090": 128,
+        "RTX 3090": 82,
+    }
+
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            encoding="utf-8",
+        )
+        gpu_name = output.strip().split("\n")[0]
+        # Match against known keys
+        for key, count in SM_COUNTS.items():
+            if key in gpu_name:
+                return count
+        # Default fallback if name not recognized but command worked
+        return 84
+    except Exception:
+        # Fallback if command fails (e.g. no nvidia-smi)
+        return 84
 
 
 def matmul(a: jax.Array, b: jax.Array) -> jax.Array:
@@ -35,9 +68,7 @@ def matmul(a: jax.Array, b: jax.Array) -> jax.Array:
         BLOCK_SIZE_K = 32
         GROUP_SIZE_M = 8
 
-    # Hardcoded for A6000 for now, as JAX device query inside function is tricky
-    # or requires passing device.
-    NUM_SMS = 84
+    NUM_SMS = _get_num_sms()
 
     num_pid_m = triton.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = triton.cdiv(N, BLOCK_SIZE_N)
